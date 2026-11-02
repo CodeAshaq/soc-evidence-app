@@ -1,0 +1,25 @@
+{
+  "name": "soc-evidence-collector",
+  "version": "1.0.0",
+  "description": "Web app untuk mengumpulkan evidence alert dari Elasticsearch / Elastic Security, triage, analisa, dan validasi IOC.",
+  "main": "server/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "demo": "DEMO_MODE=true node server/index.js",
+    "test": "node test/smoke.js && node test/auto.js && node test/pdf.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@elastic/elasticsearch": "^8.15.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "express-rate-limit": "^7.4.0",
+    "helmet": "^8.0.0",
+    "pdf-lib": "^1.17.1"
+  },
+  "license": "MIT"
+}

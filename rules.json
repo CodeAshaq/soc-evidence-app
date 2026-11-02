@@ -1,0 +1,49 @@
+{
+  "_catatan": "Aturan skor analisa otomatis. Ubah angka/daftar sesuai lingkungan Anda, lalu jalankan: docker compose restart. Kunci yang dihapus akan memakai nilai bawaan.",
+  "version": 2,
+  "weights": {
+    "severity": { "critical": 35, "high": 25, "medium": 10, "low": 0 },
+    "ioc_malicious": 40,
+    "ioc_suspicious": 20,
+    "ioc_cap": 60,
+    "suspicious_chain": 25,
+    "suspicious_cmdline": 20,
+    "scan_pattern": 15,
+    "bruteforce": 20,
+    "bruteforce_then_success": 30,
+    "allowlist": -50
+  },
+  "thresholds": {
+    "likely_tp": 85,
+    "investigate": 25
+  },
+  "scan": { "min_distinct_ports": 4 },
+  "bruteforce": { "min_failures": 4 },
+  "allowlist": {
+    "ips": [],
+    "hosts": [],
+    "users": []
+  },
+  "suspicious_chains": [
+    ["winword.exe", "powershell.exe"],
+    ["winword.exe", "cmd.exe"],
+    ["excel.exe", "powershell.exe"],
+    ["excel.exe", "cmd.exe"],
+    ["outlook.exe", "powershell.exe"],
+    ["mshta.exe", "powershell.exe"],
+    ["wmiprvse.exe", "powershell.exe"]
+  ],
+  "suspicious_cmdline": [
+    "-enc ",
+    "-encodedcommand",
+    "downloadstring",
+    "downloadfile",
+    "invoke-expression",
+    "iex ",
+    "frombase64string",
+    "-nop",
+    "-w hidden",
+    "certutil -urlcache",
+    "bitsadmin /transfer"
+  ]
+}

@@ -1,0 +1,6 @@
+.env
+certs/
+data/
+node_modules/
+*.zip
+*.bak

@@ -1,0 +1,6 @@
+# Mode edit tampilan: folder public/ dibaca langsung dari VM, jadi ubah index.html / style.css / app.js
+# cukup simpan lalu Ctrl+F5 di browser (tanpa build ulang). Hapus file ini bila tidak diperlukan.
+services:
+  soc-evidence:
+    volumes:
+      - ./public:/app/public:ro

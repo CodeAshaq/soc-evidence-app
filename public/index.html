@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SOC Evidence Collector</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand"><span class="logo" aria-hidden="true">◈</span> SOC Evidence Collector</div>
+    <div id="status" class="pills" aria-live="polite"></div>
+    <button id="btn-token" class="btn ghost small" hidden>Token akses</button>
+  </header>
+
+  <div class="layout">
+    <aside class="side">
+      <section class="panel">
+        <h2>Rentang waktu</h2>
+        <div id="presets" class="presets" role="group" aria-label="Rentang waktu"></div>
+        <div id="custom" class="custom" hidden>
+          <label>Dari <input type="datetime-local" id="from"></label>
+          <label>Sampai <input type="datetime-local" id="to"></label>
+          <button id="apply-range" class="btn small">Terapkan</button>
+        </div>
+        <div class="row">
+          <select id="f-sev" aria-label="Severity">
+            <option value="">Semua severity</option><option value="critical">Critical</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option>
+          </select>
+          <select id="f-status" aria-label="Status">
+            <option value="">Semua status</option><option value="open">Open</option><option value="acknowledged">Acknowledged</option><option value="in-progress">In progress</option><option value="closed">Closed</option>
+          </select>
+        </div>
+        <input type="search" id="f-q" placeholder="Cari IP, host, user, rule…" aria-label="Pencarian">
+      </section>
+
+      <section class="panel" id="bf-panel">
+        <h2>Analisa massal rentang ini</h2>
+        <p class="muted small">Menganalisa dan menetapkan verdict untuk seluruh alert pada rentang di atas, tanpa batas satu bulan.</p>
+        <label class="check"><input type="checkbox" id="bf-force"> Analisa ulang yang sudah dianalisa</label>
+        <div class="row"><button id="bf-run" class="btn small">Jalankan</button><button id="bf-cancel" class="btn ghost small" hidden>Batalkan</button></div>
+        <div id="bf-status" class="small muted" aria-live="polite"></div>
+        <div class="bar" id="bf-bar" hidden><i></i></div>
+      </section>
+
+      <div class="list-head"><span id="count" class="muted small"></span></div>
+      <ul id="alerts" class="alerts"></ul>
+      <button id="more" class="btn ghost" hidden>Muat lebih banyak</button>
+    </aside>
+
+    <main id="detail" class="detail">
+      <div class="empty">Pilih alert di sebelah kiri untuk melihat analisa, validasi IOC, dan TTP.</div>
+    </main>
+  </div>
+
+  <div id="toast" class="toast" role="status"></div>
+  <script src="app.js"></script>
+</body>
+</html>

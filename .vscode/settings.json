@@ -1,0 +1,14 @@
+{
+  "editor.tabSize": 2,
+  "editor.formatOnSave": true,
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "editor.wordWrap": "on",
+  "files.eol": "\n",
+  "files.trimTrailingWhitespace": true,
+  "files.insertFinalNewline": true,
+  "files.exclude": { "**/node_modules": true, "**/data": true },
+  "search.exclude": { "**/node_modules": true, "**/data": true },
+  "prettier.printWidth": 140,
+  "prettier.singleQuote": true,
+  "[json]": { "editor.defaultFormatter": "esbenp.prettier-vscode" }
+}

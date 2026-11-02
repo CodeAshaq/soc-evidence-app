@@ -1,0 +1,32 @@
+services:
+  soc-evidence:
+    build: .
+    image: soc-evidence-collector:1.0
+    container_name: soc-evidence
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Di dalam container server harus listen di 0.0.0.0.
+      # Akses dari luar VM tetap dibatasi oleh mapping port di bawah.
+      HOST: 0.0.0.0
+      PORT: "3000"
+    ports:
+      # Hanya bisa diakses dari VM itu sendiri (pakai SSH tunnel / reverse proxy).
+      # Untuk akses langsung via LAN ganti menjadi "3000:3000" DAN wajib isi APP_TOKEN di .env.
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - triage-data:/app/data      # verdict & catatan analis, tetap ada saat container dibuat ulang
+      - ./certs:/certs:ro          # taruh http_ca.crt Elasticsearch di ./certs (kosongkan bila Elastic Cloud)
+      - ./rules.json:/app/rules.json:ro   # aturan skor analisa otomatis; edit lalu: docker compose restart
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # bila Elasticsearch berjalan di VM yang sama
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  triage-data:

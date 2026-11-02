@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arsitektur - SOC Evidence Collector</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --text:#1b1f24; --muted:#5d6673; --line:#dfe3e8; --accent:#2557d6; --code:#eef0f3; --ok:#1b7a3a; --warn:#b26a00; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#101317; --card:#181c22; --text:#e6e9ed; --muted:#9aa4b2; --line:#2a313a; --accent:#6c8ff0; --code:#232932; --ok:#5fd18c; --warn:#f0b24a; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif; }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 26px; margin: 0 0 4px; }
+  h2 { font-size: 19px; margin: 36px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+  h3 { font-size: 15px; margin: 20px 0 6px; }
+  p.lead { color: var(--muted); margin-top: 0; }
+  nav { display:flex; flex-wrap:wrap; gap:8px; margin: 16px 0; }
+  nav a { padding: 3px 10px; border:1px solid var(--line); border-radius:999px; color:var(--accent); text-decoration:none; font-size:13px; background:var(--card); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; }
+  table { width:100%; border-collapse:collapse; font-size:13.5px; background:var(--card); border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { background:var(--code); font-weight:600; white-space:nowrap; }
+  .scroll { overflow-x:auto; }
+  code, pre { font-family: ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:13px; }
+  code { background:var(--code); padding:1px 5px; border-radius:4px; }
+  pre { background:var(--code); padding:14px; border-radius:8px; overflow:auto; line-height:1.5; }
+  .pill { display:inline-block; font-size:11.5px; padding:0 8px; border-radius:999px; border:1px solid var(--line); color:var(--muted); }
+  .pill.req { color:var(--ok); border-color:var(--ok); }
+  .pill.opt { color:var(--warn); border-color:var(--warn); }
+  .note { border-left:4px solid var(--warn); background:var(--card); padding:10px 14px; border-radius:0 8px 8px 0; margin:12px 0; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  @media (max-width:760px){ .grid2{ grid-template-columns:1fr; } }
+  svg { width:100%; height:auto; display:block; }
+  svg .box { fill:var(--card); stroke:var(--line); stroke-width:1.5; }
+  svg .accent { stroke:var(--accent); }
+  svg text { fill:var(--text); font:13px system-ui,sans-serif; }
+  svg .sub { fill:var(--muted); font-size:11.5px; }
+  svg .arrow { stroke:var(--muted); stroke-width:1.5; fill:none; marker-end:url(#ah); }
+  svg .dash { stroke-dasharray:5 4; }
+  footer { margin-top:40px; color:var(--muted); font-size:13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>SOC Evidence Collector</h1>
+<p class="lead">Dokumen arsitektur &amp; struktur aplikasi: aplikasi web untuk mengumpulkan evidence alert dari Elasticsearch / Elastic Security, melakukan triage, analisa, dan validasi IOC.</p>
+
+<nav>
+  <a href="#tujuan">Tujuan</a><a href="#arsitektur">Arsitektur</a><a href="#struktur">Struktur folder</a>
+  <a href="#library">Library &amp; package</a><a href="#api">Endpoint API</a><a href="#fields">Field yang dibaca</a>
+  <a href="#alur">Alur kerja analis</a><a href="#keamanan">Keamanan</a><a href="#konfigurasi">Konfigurasi</a><a href="#roadmap">Pengembangan lanjut</a>
+</nav>
+
+<h2 id="tujuan">1. Tujuan &amp; ruang lingkup</h2>
+<div class="card">
+  <p><b>Masalah:</b> saat alert masuk dan analis diminta evidence, data harus dicari lewat query manual atau berpindah-pindah halaman di Kibana.</p>
+  <p><b>Solusi:</b> satu halaman yang, dari sebuah alert, langsung menampilkan IP, port, host, user, proses, file, hash, konteks MITRE, event terkait pada jendela waktu tertentu, hasil validasi IOC, lalu menyimpan verdict dan catatan analis, dan mengekspor semuanya sebagai laporan evidence.</p>
+  <ul>
+    <li><b>Evidence collection</b>: ekstraksi otomatis dari dokumen alert (ECS) + pivot ke log lain.</li>
+    <li><b>Triage</b>: verdict (true positive / false positive / benign / perlu investigasi), catatan, dan opsional mengubah status alert di Kibana.</li>
+    <li><b>Analisa</b>: tabel event terkait berdasarkan IP / host / user pada ±N menit dari alert.</li>
+    <li><b>Validasi IOC</b>: VirusTotal dan AbuseIPDB (opsional), dengan cache dan perlindungan IP privat.</li>
+  </ul>
+</div>
+
+<h2 id="arsitektur">2. Arsitektur</h2>
+<div class="card">
+<svg viewBox="0 0 900 330" role="img" aria-label="Diagram arsitektur: browser ke server Express, lalu ke Elasticsearch, Kibana, VirusTotal, AbuseIPDB, dan file triage lokal">
+  <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor" style="color:var(--muted)"/></marker></defs>
+
+  <rect class="box" x="20" y="125" width="170" height="80" rx="10"/>
+  <text x="105" y="158" text-anchor="middle" font-weight="600">Browser analis</text>
+  <text class="sub" x="105" y="178" text-anchor="middle">HTML + CSS + JS murni</text>
+  <text class="sub" x="105" y="194" text-anchor="middle">(public/)</text>
+
+  <rect class="box accent" x="270" y="95" width="200" height="140" rx="10"/>
+  <text x="370" y="125" text-anchor="middle" font-weight="600">Server Express (Node.js)</text>
+  <text class="sub" x="370" y="148" text-anchor="middle">routing + validasi input</text>
+  <text class="sub" x="370" y="165" text-anchor="middle">ekstraksi evidence &amp; IOC</text>
+  <text class="sub" x="370" y="182" text-anchor="middle">pembuat laporan</text>
+  <text class="sub" x="370" y="199" text-anchor="middle">helmet · rate-limit · token</text>
+  <text class="sub" x="370" y="216" text-anchor="middle">(server/)</text>
+
+  <rect class="box" x="580" y="10" width="300" height="56" rx="10"/>
+  <text x="730" y="35" text-anchor="middle" font-weight="600">Elasticsearch</text>
+  <text class="sub" x="730" y="52" text-anchor="middle">.alerts-security.alerts-* · logs-*</text>
+
+  <rect class="box" x="580" y="84" width="300" height="56" rx="10"/>
+  <text x="730" y="109" text-anchor="middle" font-weight="600">Kibana API (opsional)</text>
+  <text class="sub" x="730" y="126" text-anchor="middle">ubah status alert</text>
+
+  <rect class="box" x="580" y="158" width="300" height="56" rx="10"/>
+  <text x="730" y="183" text-anchor="middle" font-weight="600">VirusTotal · AbuseIPDB (opsional)</text>
+  <text class="sub" x="730" y="200" text-anchor="middle">hanya IOC publik yang dikirim</text>
+
+  <rect class="box" x="580" y="232" width="300" height="56" rx="10"/>
+  <text x="730" y="257" text-anchor="middle" font-weight="600">data/triage.json</text>
+  <text class="sub" x="730" y="274" text-anchor="middle">verdict &amp; catatan analis (lokal)</text>
+
+  <path class="arrow" d="M190 165 H270"/>
+  <path class="arrow" d="M470 125 L580 40"/>
+  <path class="arrow dash" d="M470 140 L580 112"/>
+  <path class="arrow dash" d="M470 175 L580 186"/>
+  <path class="arrow" d="M470 205 L580 258"/>
+  <text class="sub" x="230" y="155" text-anchor="middle">/api</text>
+  <text class="sub" x="20" y="320">Garis putus-putus = integrasi opsional. Kredensial Elastic/API key hanya ada di server, tidak pernah dikirim ke browser.</text>
+</svg>
+</div>
+
+<h3>Mengapa ada server perantara?</h3>
+<ul>
+  <li>Browser tidak perlu (dan tidak boleh) memegang kredensial Elasticsearch / API key threat intel.</li>
+  <li>Membatasi query: server hanya membangun query terparameter yang sudah ditentukan, bukan meneruskan query bebas.</li>
+  <li>Menghindari masalah CORS dan memudahkan audit.</li>
+</ul>
+
+<h3>Mode demo</h3>
+<p><code>DEMO_MODE=true</code> memakai <code>server/demo.js</code> (5 alert contoh bergaya Fortinet, Sangfor, dan M365 Defender, dengan IP rentang dokumentasi RFC 5737) sehingga UI bisa dicoba tanpa Elasticsearch. Hasil IOC pada mode ini adalah <b>simulasi</b> dan ditandai jelas di UI.</p>
+
+<h2 id="struktur">3. Struktur folder</h2>
+<pre>soc-evidence-app/
+├── package.json            # dependensi &amp; script (start, dev, demo)
+├── .env.example            # template konfigurasi (salin ke .env)
+├── README.md               # cara pasang &amp; jalankan
+├── server/
+│   ├── index.js            # Express app: middleware, routes, static files
+│   ├── config.js           # baca .env → objek konfigurasi
+│   ├── elastic.js          # klien Elasticsearch: cari alert, ambil alert, pivot event, update status via Kibana
+│   ├── extract.js          # flatten dokumen, ekstraksi evidence &amp; IOC, deteksi tipe IOC, cek IP privat
+│   ├── ioc.js              # validasi IOC: VirusTotal, AbuseIPDB, cache, tautan lookup manual
+│   ├── report.js           # laporan evidence: Markdown / HTML mandiri (output di-escape)
+│   ├── store.js            # penyimpanan triage lokal (JSON, atomic write)
+│   └── demo.js             # data contoh untuk DEMO_MODE
+├── public/
+│   ├── index.html          # kerangka halaman
+│   ├── style.css           # tema terang/gelap otomatis
+│   └── app.js              # logika UI (tanpa framework, tanpa innerHTML)
+├── test/
+│   └── smoke.js            # smoke test modul murni: npm test
+├── data/
+│   └── triage.json         # dibuat otomatis saat triage pertama disimpan
+└── docs/
+    └── architecture.html   # dokumen ini</pre>
+
+<h2 id="library">4. Library &amp; package</h2>
+<p class="lead">Sengaja ringan: 5 dependensi runtime, tanpa framework frontend, tanpa langkah build. HTTP ke Kibana / VirusTotal / AbuseIPDB memakai <code>fetch</code> bawaan Node.js 18+.</p>
+
+<h3>Runtime</h3>
+<div class="scroll"><table>
+  <tr><th>Komponen</th><th>Versi (di package.json)</th><th>Fungsi</th><th>Status</th></tr>
+  <tr><td><b>Node.js</b></td><td>&ge; 18 (diuji dengan 22)</td><td>Runtime server; menyediakan <code>fetch</code>, <code>AbortSignal.timeout</code>, <code>node:test</code>.</td><td><span class="pill req">wajib</span></td></tr>
+  <tr><td><code>express</code></td><td>^4.21.0</td><td>Web server, routing, static file, parsing JSON.</td><td><span class="pill req">wajib</span></td></tr>
+  <tr><td><code>@elastic/elasticsearch</code></td><td>^8.15.0</td><td>Klien resmi Elasticsearch (API key / basic auth, TLS &amp; CA kustom).</td><td><span class="pill req">wajib</span></td></tr>
+  <tr><td><code>dotenv</code></td><td>^16.4.5</td><td>Memuat konfigurasi dari file <code>.env</code>.</td><td><span class="pill req">wajib</span></td></tr>
+  <tr><td><code>helmet</code></td><td>^8.0.0</td><td>Header keamanan HTTP, termasuk Content-Security-Policy (blokir inline script).</td><td><span class="pill req">wajib</span></td></tr>
+  <tr><td><code>express-rate-limit</code></td><td>^7.4.0</td><td>Membatasi 120 request/menit per klien pada <code>/api</code>.</td><td><span class="pill req">wajib</span></td></tr>
+</table></div>
+
+<h3>Modul bawaan Node.js yang dipakai</h3>
+<div class="scroll"><table>
+  <tr><th>Modul</th><th>Dipakai untuk</th></tr>
+  <tr><td><code>net</code></td><td>Validasi IPv4/IPv6 (<code>net.isIP</code>) sebelum masuk query atau dikirim ke TI.</td></tr>
+  <tr><td><code>crypto</code></td><td>Perbandingan token waktu-konstan (<code>timingSafeEqual</code>).</td></tr>
+  <tr><td><code>fs</code>, <code>path</code></td><td>Penyimpanan triage (tulis ke file sementara lalu rename), membaca CA certificate.</td></tr>
+</table></div>
+
+<h3>Layanan eksternal (opsional)</h3>
+<div class="scroll"><table>
+  <tr><th>Layanan</th><th>Endpoint</th><th>Konfigurasi</th><th>Catatan</th></tr>
+  <tr><td>VirusTotal API v3</td><td><code>/ip_addresses</code>, <code>/domains</code>, <code>/files</code>, <code>/urls</code></td><td><code>VT_API_KEY</code></td><td>Kuota gratis terbatas; hasil di-cache (default 60 menit).</td></tr>
+  <tr><td>AbuseIPDB API v2</td><td><code>/check</code></td><td><code>ABUSEIPDB_API_KEY</code></td><td>Khusus IP; confidence score 0-100 (90 hari terakhir).</td></tr>
+  <tr><td>Kibana Detections API</td><td><code>POST /api/detection_engine/signals/status</code></td><td><code>KIBANA_URL</code>, <code>KIBANA_API_KEY</code></td><td>Tanpa ini, status hanya disimpan lokal.</td></tr>
+</table></div>
+
+<h3>Frontend</h3>
+<p>Tanpa library. Semua UI dibangun dengan helper <code>h()</code> berbasis <code>document.createElement</code> dan <code>textContent</code>. Ini disengaja: data log berasal dari pihak yang tidak tepercaya (nama file, command line, user-agent, dsb.) sehingga tidak boleh disisipkan sebagai HTML.</p>
+
+<div class="note"><b>Catatan versi:</b> angka di tabel adalah rentang di <code>package.json</code>. Jalankan <code>npm ls --depth=0</code> setelah <code>npm install</code> untuk melihat versi yang benar-benar terpasang, dan sesuaikan klien <code>@elastic/elasticsearch</code> dengan versi cluster Anda (mayor yang sama; mis. cluster 8.x &rarr; klien 8.x).</div>
+
+<h2 id="api">5. Endpoint API</h2>
+<div class="scroll"><table>
+  <tr><th>Method</th><th>Path</th><th>Fungsi</th></tr>
+  <tr><td>GET</td><td><code>/api/health</code></td><td>Status server, koneksi Elastic, integrasi TI/Kibana yang aktif. Tidak perlu token.</td></tr>
+  <tr><td>GET</td><td><code>/api/alerts</code></td><td>Daftar alert. Query: <code>from</code>, <code>to</code>, <code>severity</code>, <code>status</code>, <code>q</code> (IP / teks), <code>size</code> (maks 200).</td></tr>
+  <tr><td>GET</td><td><code>/api/alerts/:id</code></td><td>Detail alert: evidence terstruktur, IOC, raw JSON, dan triage tersimpan.</td></tr>
+  <tr><td>POST</td><td><code>/api/alerts/:id/related</code></td><td>Event terkait pada ±<code>window_minutes</code> (1-1440). Pivot default: semua IP, host, user pada alert.</td></tr>
+  <tr><td>GET</td><td><code>/api/ioc?value=</code></td><td>Validasi satu IOC (IP, domain, URL, MD5/SHA1/SHA256).</td></tr>
+  <tr><td>POST</td><td><code>/api/ioc/bulk</code></td><td>Validasi hingga 20 IOC sekaligus (berurutan, agar aman terhadap rate limit API gratis).</td></tr>
+  <tr><td>PUT</td><td><code>/api/alerts/:id/triage</code></td><td>Simpan verdict, catatan, dan opsional ubah status (diteruskan ke Kibana bila dikonfigurasi).</td></tr>
+  <tr><td>GET</td><td><code>/api/alerts/:id/report?format=md|html|json&amp;window=15</code></td><td>Laporan evidence lengkap untuk diunduh / dilampirkan ke tiket.</td></tr>
+</table></div>
+
+<h2 id="fields">6. Field yang dibaca</h2>
+<p>Aplikasi mengikuti <b>Elastic Common Schema (ECS)</b>, sehingga log dari integrasi Fortinet, Sangfor, dan Microsoft 365 Defender yang sudah dinormalisasi ke ECS akan terbaca otomatis. Bila ada field khusus pada pipeline Anda, tambahkan di <code>server/extract.js</code> (<code>FIELD_MAP</code> dan fungsi <code>extractEvidence</code>).</p>
+<div class="scroll"><table>
+  <tr><th>Kategori</th><th>Field</th></tr>
+  <tr><td>Alert</td><td><code>kibana.alert.rule.name</code>, <code>.severity</code>, <code>.risk_score</code>, <code>.workflow_status</code>, <code>.reason</code>, <code>kibana.alert.rule.threat.*</code> (MITRE)</td></tr>
+  <tr><td>Jaringan</td><td><code>source.ip/port</code>, <code>destination.ip/port</code>, <code>network.transport</code>, <code>network.direction</code>, <code>network.bytes</code>, <code>event.action</code>, <code>event.outcome</code></td></tr>
+  <tr><td>Host &amp; user</td><td><code>host.name/os.name/ip/mac</code>, <code>user.name/domain/email</code></td></tr>
+  <tr><td>Proses &amp; file</td><td><code>process.name/pid/executable/command_line/parent.*</code>, <code>file.path/name</code>, <code>file.hash.*</code>, <code>process.hash.*</code></td></tr>
+  <tr><td>IOC</td><td><code>dns.question.name</code>, <code>url.domain/full/original</code>, <code>destination.domain</code>, hash MD5/SHA1/SHA256</td></tr>
+  <tr><td>Konteks</td><td><code>event.dataset</code>, <code>event.module</code>, <code>event.category</code>, <code>event.original</code> / <code>message</code>, <code>agent.name</code></td></tr>
+</table></div>
+
+<h2 id="alur">7. Alur kerja analis</h2>
+<div class="grid2">
+  <div class="card">
+    <ol>
+      <li>Buka aplikasi, filter alert (waktu, severity, status, atau cari IP / host / user).</li>
+      <li>Pilih alert: tab <b>Evidence</b> langsung menampilkan IP, port, host, user, proses, hash.</li>
+      <li>Tab <b>Event terkait</b>: lihat aktivitas IP/host/user yang sama pada ±N menit.</li>
+      <li>Tab <b>Validasi IOC</b>: cek reputasi IP, domain, hash, URL.</li>
+    </ol>
+  </div>
+  <div class="card">
+    <ol start="5">
+      <li>Tab <b>Triage</b>: tetapkan verdict, tulis catatan, ubah status.</li>
+      <li><b>Salin ringkasan</b> untuk ditempel ke tiket, atau <b>Export</b> .md / .html / .json sebagai laporan evidence.</li>
+    </ol>
+    <p class="note" style="margin-bottom:0">Verdict dan catatan tersimpan di <code>data/triage.json</code> dan ikut masuk ke laporan.</p>
+  </div>
+</div>
+
+<h2 id="keamanan">8. Keamanan</h2>
+<div class="scroll"><table>
+  <tr><th>Risiko</th><th>Mitigasi di aplikasi</th></tr>
+  <tr><td>XSS dari data log (konten dikendalikan penyerang)</td><td>UI memakai <code>textContent</code> (tanpa <code>innerHTML</code>); CSP dari helmet memblokir inline script; laporan HTML dan Markdown meng-escape semua nilai.</td></tr>
+  <tr><td>Injeksi query Elasticsearch</td><td>Query dibangun server dengan parameter terstruktur; IP divalidasi <code>net.isIP</code>; severity/status memakai daftar putih; input teks dibatasi 200 karakter dan memakai <code>simple_query_string</code>.</td></tr>
+  <tr><td>Kebocoran kredensial</td><td>Semua kredensial di <code>.env</code> sisi server; error ke klien dibuat generik, detail hanya di log server.</td></tr>
+  <tr><td>Akses tanpa izin</td><td>Server default bind ke <code>127.0.0.1</code>; <code>APP_TOKEN</code> opsional (header <code>x-api-token</code>, perbandingan waktu-konstan); rate limit pada <code>/api</code>.</td></tr>
+  <tr><td>Kebocoran data internal ke pihak ketiga</td><td>IP privat tidak pernah dikirim ke VirusTotal / AbuseIPDB. Domain dan URL internal <i>bisa</i> terkirim bila ikut menjadi IOC: tinjau sebelum mengaktifkan API key.</td></tr>
+  <tr><td>Akun Elastic berlebihan</td><td>Buat API key khusus <i>read-only</i> pada index alert dan log yang dibutuhkan; untuk update status gunakan key Kibana terpisah dengan hak minimum.</td></tr>
+</table></div>
+<div class="note"><b>Sebelum dipakai di jaringan:</b> letakkan di belakang reverse proxy HTTPS (Nginx / Caddy), set <code>APP_TOKEN</code> atau autentikasi SSO di proxy, dan jangan set <code>ES_TLS_REJECT_UNAUTHORIZED=false</code> di produksi (gunakan <code>ES_CA_CERT</code>).</div>
+
+<h2 id="konfigurasi">9. Konfigurasi penting (<code>.env</code>)</h2>
+<div class="scroll"><table>
+  <tr><th>Variabel</th><th>Keterangan</th></tr>
+  <tr><td><code>ES_NODE</code>, <code>ES_API_KEY</code> / <code>ES_USERNAME</code>+<code>ES_PASSWORD</code></td><td>Alamat dan kredensial Elasticsearch.</td></tr>
+  <tr><td><code>ES_ALERT_INDEX</code></td><td>Default <code>.alerts-security.alerts-default</code> (ubah bila memakai Kibana Space lain).</td></tr>
+  <tr><td><code>ES_EVENT_INDEX</code></td><td>Index log untuk pivot, pisahkan dengan koma (mis. <code>logs-fortinet*,logs-sangfor*,logs-o365*</code>). Mempersempit index mempercepat query.</td></tr>
+  <tr><td><code>KIBANA_URL</code>, <code>KIBANA_API_KEY</code></td><td>Aktifkan untuk mengubah status alert langsung di Elastic.</td></tr>
+  <tr><td><code>VT_API_KEY</code>, <code>ABUSEIPDB_API_KEY</code></td><td>Aktifkan validasi IOC otomatis.</td></tr>
+  <tr><td><code>APP_TOKEN</code>, <code>HOST</code>, <code>PORT</code></td><td>Akses &amp; binding server.</td></tr>
+  <tr><td><code>DEMO_MODE</code></td><td><code>true</code> untuk mencoba tanpa Elasticsearch.</td></tr>
+</table></div>
+
+<h2 id="roadmap">10. Pengembangan lanjut</h2>
+<ul>
+  <li>Ganti <code>store.js</code> (JSON) dengan SQLite/PostgreSQL bila dipakai banyak analis; tambahkan login SSO dan audit log.</li>
+  <li>Integrasi lain: MISP / OpenCTI, Shodan, GreyNoise, WHOIS, sandbox hash.</li>
+  <li>Mapping field khusus untuk Fortinet (<code>fortinet.firewall.*</code>) dan Sangfor sesuai pipeline Anda, serta tampilan khusus per dataset.</li>
+  <li>Timeline gabungan (alert + event) dan grafik hubungan IP-host-user.</li>
+  <li>Template laporan sesuai format tiket / SOP internal; unggah otomatis ke sistem tiket.</li>
+  <li>Perluas <code>test/smoke.js</code> (saat ini menguji ekstraksi IOC, mode demo, laporan, dan escaping XSS) menjadi unit test penuh dengan <code>node --test</code>.</li>
+</ul>
+
+<footer>SOC Evidence Collector &middot; dokumen arsitektur v1.0 &middot; Dibuat 28 Oktober 2026</footer>
+</div>
+</body>
+</html>

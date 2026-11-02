@@ -1,0 +1,9 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    { "label": "Build ulang & jalankan", "type": "shell", "command": "docker compose up -d --build", "problemMatcher": [] },
+    { "label": "Restart (setelah ubah rules.json / .env)", "type": "shell", "command": "docker compose restart", "problemMatcher": [] },
+    { "label": "Lihat log", "type": "shell", "command": "docker compose logs -f --tail=40", "problemMatcher": [] },
+    { "label": "Cek sintaks JS", "type": "shell", "command": "for f in server/*.js public/app.js; do node --check \"$f\" || exit 1; done && echo SINTAKS OK", "problemMatcher": [] }
+  ]
+}
