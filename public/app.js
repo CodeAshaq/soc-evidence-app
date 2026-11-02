@@ -228,7 +228,7 @@ function verdictBanner(d, an) {
       e.target.disabled = true;
       try { await post(`/api/alerts/${encodeURIComponent(d.id)}/analysis`, { window_minutes: state.win }); toast('Analisa diperbarui'); await Promise.all([openAlert(d.id), loadAlerts()]); } catch (er) { toast(`Gagal: ${er.message}`); e.target.disabled = false; }
     } }),
-    h('button', { class: 'btn small', type: 'button', text: 'Report PDF', onclick: (e) => exportReport(d.id, 'pdf', e.target) }));
+    h('button', { class: 'btn small', type: 'button', text: 'Unduh PDF', onclick: (e) => exportReport(d.id, 'pdf', e.target) }));
   box.append(acts, form);
   return box;
 }
