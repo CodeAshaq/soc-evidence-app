@@ -8,7 +8,7 @@
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
     "demo": "DEMO_MODE=true node server/index.js",
-    "test": "node test/smoke.js && node test/auto.js && node test/pdf.js"
+    "test": "node test/smoke.js && node test/auto.js && node test/pdf.js && node test/security.js"
   },
   "engines": {
     "node": ">=18"

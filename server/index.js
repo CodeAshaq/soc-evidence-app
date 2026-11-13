@@ -15,35 +15,41 @@ const { toPdf } = require('./pdf');
 const worker = require('./worker');
 const enrich = require('./enrichment-store');
 const { extractEvidence, isPrivateIp } = require('./extract');
+const security = require('./security');
+const { createAudit } = require('./audit');
+const vault = require('./vault').instance();
+const audit = createAudit({ file: path.join(__dirname, '..', 'data', 'audit.log') });
+const actorOf = (req) => String((req.body && req.body.analyst) || req.get('x-analyst') || '-').slice(0, 60);
+const ipOf = (req) => (req.socket && req.socket.remoteAddress) || '-';
 
 const app = express();
 app.disable('x-powered-by');
-app.use(
-  helmet({
-    contentSecurityPolicy: {
-      useDefaults: true,
-      directives: { 'upgrade-insecure-requests': null }, // aplikasi sering dipakai di LAN via http
-    },
-  })
-);
+// ---- Pengaman akses lokal: tolak DNS rebinding & CSRF lintas situs (lihat server/security.js) ----
+app.use(security.hostOriginGuard({ allowedHosts: config.allowedHosts, audit }));
+
+// CSP ketat untuk aplikasi; halaman /docs (dokumentasi statis) boleh memakai style inline.
+const cspBase = {
+  defaultSrc: ["'self'"], scriptSrc: ["'self'"], imgSrc: ["'self'", 'data:'], connectSrc: ["'self'"],
+  objectSrc: ["'none'"], baseUri: ["'none'"], formAction: ["'self'"], frameAncestors: ["'none'"], upgradeInsecureRequests: null,
+};
+const helmetApp = helmet({ contentSecurityPolicy: { useDefaults: false, directives: { ...cspBase, styleSrc: ["'self'"] } } });
+const helmetDocs = helmet({ contentSecurityPolicy: { useDefaults: false, directives: { ...cspBase, styleSrc: ["'self'", "'unsafe-inline'"] } } });
+app.use((req, res, next) => (req.path.startsWith('/docs') ? helmetDocs : helmetApp)(req, res, next));
+app.use('/api', (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
+
+// Rute rahasia memakai batas body kecil (8 KB) dan rate limit lebih ketat. Dipasang sebelum parser global.
+app.use('/api/secrets', security.jsonOnly(), express.json({ limit: '8kb' }),
+  rateLimit({ windowMs: 60 * 1000, limit: 10, standardHeaders: true, legacyHeaders: false }));
+app.use('/api', security.jsonOnly());
 app.use(express.json({ limit: '100kb' }));
 app.use('/api', rateLimit({ windowMs: 60 * 1000, limit: 120, standardHeaders: true, legacyHeaders: false }));
 
-// ---- Autentikasi token sederhana (opsional) ----
-function safeEqual(a, b) {
-  const A = Buffer.from(String(a));
-  const B = Buffer.from(String(b));
-  return A.length === B.length && crypto.timingSafeEqual(A, B);
-}
-app.use('/api', (req, res, next) => {
-  if (!config.appToken || req.path === '/health') return next();
-  if (safeEqual(req.get('x-api-token') || '', config.appToken)) return next();
-  return res.status(401).json({ error: 'Token tidak valid' });
-});
+// ---- Autentikasi token (header x-api-token saja; tidak dari cookie atau query string) ----
+app.use('/api', security.tokenAuth({ token: config.appToken, audit }));
 
 const wrap = (fn) => (req, res) =>
   Promise.resolve(fn(req, res)).catch((err) => {
-    console.error(`[${req.method} ${req.path}]`, err.message);
+    console.error(`[${req.method} ${req.path}]`, security.redactText(err.message));
     // pesan error generik ke klien; detail hanya di log server
     res.status(500).json({ error: 'Terjadi kesalahan pada server. Lihat log server.' });
   });
@@ -60,9 +66,44 @@ app.get('/api/health', wrap(async (req, res) => {
   }
   info.ti = { virustotal: Boolean(config.ti.vtKey), abuseipdb: Boolean(config.ti.abuseKey) };
   info.kibana_status_update = Boolean(config.kibana.url);
+  info.vault = { available: vault.available };
   info.auto = worker.status();
   res.json(info);
 }));
+
+// ---- Rahasia (API key): hanya bisa ditulis, nilainya tidak pernah dikirim balik ----
+const SECRET_NAMES = ['VT_API_KEY', 'ABUSEIPDB_API_KEY'];
+const requireToken = (req, res) => {
+  if (config.appToken) return true;
+  res.status(403).json({ error: 'Atur APP_TOKEN di .env terlebih dahulu sebelum mengelola key lewat aplikasi.' });
+  return false;
+};
+app.get('/api/secrets', (req, res) => res.json({ vault_available: vault.available, allowed: SECRET_NAMES, secrets: vault.meta() }));
+app.put('/api/secrets/:name', wrap(async (req, res) => {
+  if (!requireToken(req, res)) return;
+  const name = req.params.name;
+  if (!SECRET_NAMES.includes(name)) return res.status(400).json({ error: 'Nama key tidak dikenal' });
+  const b = req.body || {};
+  try {
+    const m = vault.set(name, b.value, { label: b.label });
+    audit.record({ action: 'secret.set', ip: ipOf(req), actor: actorOf(req), detail: { name, label: m.label } });
+    return res.json({ secret: m });
+  } catch (e) {
+    audit.record({ action: 'secret.set', ok: false, ip: ipOf(req), actor: actorOf(req), detail: { name, code: e.code } });
+    const code = { NO_MASTER_KEY: 409, BAD_VALUE: 400, BAD_NAME: 400 }[e.code];
+    if (code) return res.status(code).json({ error: e.message });
+    throw e;
+  }
+}));
+app.delete('/api/secrets/:name', wrap(async (req, res) => {
+  if (!requireToken(req, res)) return;
+  const name = req.params.name;
+  if (!SECRET_NAMES.includes(name)) return res.status(400).json({ error: 'Nama key tidak dikenal' });
+  const removed = vault.remove(name);
+  audit.record({ action: 'secret.delete', ok: removed, ip: ipOf(req), actor: actorOf(req), detail: { name } });
+  res.json({ removed });
+}));
+app.get('/api/audit', (req, res) => res.json({ events: audit.tail(req.query.limit) }));
 
 app.get('/api/alerts', wrap(async (req, res) => {
   const data = await es.searchAlerts(req.query);
@@ -136,12 +177,14 @@ app.put('/api/alerts/:id/triage', wrap(async (req, res) => {
   } catch (e) {
     return res.status(400).json({ error: e.message });
   }
+  audit.record({ action: 'triage.update', ip: ipOf(req), actor: actorOf(req), detail: { alert: req.params.id, verdict: b.verdict, status: b.status, has_note: Boolean(b.note) } });
   let elastic = null;
   if (b.status) elastic = await es.setAlertStatus(req.params.id, b.status, b.note);
   res.json({ triage: saved, elastic });
 }));
 
 app.get('/api/alerts/:id/report', wrap(async (req, res) => {
+  audit.record({ action: 'report.export', ip: ipOf(req), actor: actorOf(req), detail: { alert: req.params.id, format: String(req.query.format || 'md').slice(0, 10) } });
   const found = await es.getAlert(req.params.id);
   if (!found) return res.status(404).json({ error: 'Alert tidak ditemukan' });
   const evidence = { timestamp: found.source['@timestamp'], ...extractEvidence(found.source) };
@@ -194,6 +237,7 @@ app.get('/api/alerts/:id/analysis', wrap(async (req, res) => {
 
 app.post('/api/alerts/:id/analysis', wrap(async (req, res) => {
   try {
+    audit.record({ action: 'analysis.run', ip: ipOf(req), actor: actorOf(req), detail: { alert: req.params.id } });
     const rec = await worker.enrichOne(es, req.params.id, { throttle: false, windowMinutes: req.body && req.body.window_minutes });
     if (!rec) return res.status(404).json({ error: 'Alert tidak ditemukan' });
     return res.json({ analysis: rec });
@@ -216,6 +260,7 @@ app.post('/api/auto/backfill', wrap(async (req, res) => {
   const allowed = ['critical', 'high', 'medium', 'low', 'all'];
   const severities = Array.isArray(b.severities) ? b.severities.map(String).filter((s) => allowed.includes(s)) : [];
   try {
+    audit.record({ action: 'backfill.start', ip: ipOf(req), actor: actorOf(req), detail: { from: from.toISOString(), to: to.toISOString(), severities, force: Boolean(b.force) } });
     const bf = await worker.backfill(es, { from: from.toISOString(), to: to.toISOString(), severities, force: Boolean(b.force) });
     return res.status(202).json({ backfill: bf });
   } catch (e) {
@@ -225,6 +270,7 @@ app.post('/api/auto/backfill', wrap(async (req, res) => {
 }));
 
 app.post('/api/auto/backfill/cancel', (req, res) => {
+  audit.record({ action: 'backfill.cancel', ip: ipOf(req), actor: actorOf(req) });
   worker.cancelBackfill();
   res.json(worker.status());
 });
@@ -234,10 +280,21 @@ app.use('/docs', express.static(path.join(__dirname, '..', 'docs')));
 app.use(express.static(path.join(__dirname, '..', 'public')));
 app.use('/api', (req, res) => res.status(404).json({ error: 'Endpoint tidak ada' }));
 
+// Penanganan error global: pesan generik ke klien, detail (tanpa rahasia) hanya di log.
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  if (err && err.type === 'entity.too.large') return res.status(413).json({ error: 'Isi permintaan terlalu besar' });
+  if (err && err.type === 'entity.parse.failed') return res.status(400).json({ error: 'JSON tidak valid' });
+  console.error(`[${req.method} ${req.path}]`, security.redactText(err && err.message));
+  return res.status(500).json({ error: 'Terjadi kesalahan pada server. Lihat log server.' });
+});
+
 if (require.main === module) {
   app.listen(config.port, config.host, () => {
     console.log(`SOC Evidence Collector berjalan di http://${config.host}:${config.port}  (demo=${config.demoMode})`);
     worker.start(es);
+    if (!config.appToken) console.warn('CATATAN: APP_TOKEN kosong. Pengelolaan key lewat aplikasi dinonaktifkan sampai APP_TOKEN diisi.');
+    if (!vault.available) console.warn('CATATAN: VAULT_KEY kosong. Key tidak bisa disimpan lewat aplikasi (key dari .env tetap dipakai).');
     if (config.host !== '127.0.0.1' && !config.appToken) {
       console.warn('PERINGATAN: aplikasi terbuka di jaringan tanpa APP_TOKEN. Set APP_TOKEN di .env.');
     }

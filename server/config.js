@@ -1,6 +1,7 @@
 'use strict';
 require('dotenv').config();
 const path = require('path');
+const vault = require('./vault').instance();
 
 const bool = (v, d = false) => (v === undefined || v === '' ? d : String(v).toLowerCase() === 'true');
 const list = (v, d) => (v ? v.split(',').map((s) => s.trim()).filter(Boolean) : d);
@@ -14,6 +15,8 @@ module.exports = {
   host: process.env.HOST || '127.0.0.1',
   demoMode: bool(process.env.DEMO_MODE, false),
   appToken: process.env.APP_TOKEN || '',
+  // Host tambahan yang boleh mengakses aplikasi (selain localhost, 127.0.0.1, ::1). Pisahkan dengan koma.
+  allowedHosts: list(process.env.ALLOWED_HOSTS, []),
 
   es: {
     node: process.env.ES_NODE || 'https://localhost:9200',
@@ -32,8 +35,9 @@ module.exports = {
   },
 
   ti: {
-    vtKey: process.env.VT_API_KEY || '',
-    abuseKey: process.env.ABUSEIPDB_API_KEY || '',
+    // Key dari brankas (diisi lewat aplikasi) diutamakan; bila kosong dipakai nilai dari .env.
+    get vtKey() { return vault.getOr('VT_API_KEY', process.env.VT_API_KEY); },
+    get abuseKey() { return vault.getOr('ABUSEIPDB_API_KEY', process.env.ABUSEIPDB_API_KEY); },
     cacheMinutes: parseInt(process.env.IOC_CACHE_MINUTES || '60', 10),
   },
 
